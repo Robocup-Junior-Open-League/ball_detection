@@ -1,248 +1,159 @@
 import os
 import sys
 import argparse
-import glob
 import time
+import math
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
-# Define and parse user input arguments
-
+# Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', help='Path to YOLO model file (example: "runs/detect/train/weights/best.pt")',
-                    required=True)
-parser.add_argument('--source', help='Image source, can be image file ("test.jpg"), \
-                    image folder ("test_dir"), video file ("testvid.mp4"), index of USB camera ("usb0"), or index of Picamera ("picamera0")', 
-                    required=True)
-parser.add_argument('--thresh', help='Minimum confidence threshold for displaying detected objects (example: "0.4")',
-                    default=0.5)
-parser.add_argument('--resolution', help='Resolution in WxH to display inference results at (example: "640x480"), \
-                    otherwise, match source resolution',
-                    default=None)
-parser.add_argument('--record', help='Record results from video or webcam and save it as "demo1.avi". Must specify --resolution argument to record.',
-                    action='store_true')
-
+parser.add_argument('--model', help='Path to YOLO model file', required=True)
+parser.add_argument('--source', help='Image source ("usb0" for webcam)', required=True)
+parser.add_argument('--thresh', help='Minimum confidence', default=0.5)
+parser.add_argument('--resolution', help='Resolution in WxH', default=None)
 args = parser.parse_args()
 
-
-# Parse user inputs
 model_path = args.model
 img_source = args.source
 min_thresh = float(args.thresh)
 user_res = args.resolution
-record = args.record
 
-# Check if model file exists and is valid
-if (not os.path.exists(model_path)):
-    print('ERROR: Model path is invalid or model was not found. Make sure the model filename was entered correctly.')
+if not os.path.exists(model_path):
+    print('ERROR: Model path is invalid.')
     sys.exit(0)
 
-# Load the model into memory and get labemap
-model = YOLO(model_path, task='detect')
-labels = model.names
-
-# Parse input to determine if image source is a file, folder, video, or USB camera
-img_ext_list = ['.jpg','.JPG','.jpeg','.JPEG','.png','.PNG','.bmp','.BMP']
-vid_ext_list = ['.avi','.mov','.mp4','.mkv','.wmv']
-
-if os.path.isdir(img_source):
-    source_type = 'folder'
-elif os.path.isfile(img_source):
-    _, ext = os.path.splitext(img_source)
-    if ext in img_ext_list:
-        source_type = 'image'
-    elif ext in vid_ext_list:
-        source_type = 'video'
-    else:
-        print(f'File extension {ext} is not supported.')
-        sys.exit(0)
-elif 'usb' in img_source:
-    source_type = 'usb'
-    usb_idx = int(img_source[3:])
-elif 'picamera' in img_source:
-    source_type = 'picamera'
-    picam_idx = int(img_source[8:])
+# --- NVIDIA CUDA SETUP ---
+print("Initializing NVIDIA CUDA acceleration...")
+if torch.cuda.is_available():
+    cuda_device = torch.device('cuda')
+    # Print out the exact name of your NVIDIA card
+    print(f"✅ Hardware Acceleration Enabled: Using NVIDIA GPU ({torch.cuda.get_device_name(0)})")
 else:
-    print(f'Input {img_source} is invalid. Please try again.')
-    sys.exit(0)
+    print("⚠️ NVIDIA CUDA not found! Falling back to CPU.")
+    cuda_device = torch.device('cpu')
 
-# Parse user-specified display resolution
+# Load model
+print("Loading model...")
+model = YOLO(model_path)
+model.to(cuda_device)
+labels = model.names
+print("Model loaded successfully.")
+
+# Setup Camera
+usb_idx = int(img_source.replace('usb', ''))
+cap = cv2.VideoCapture(usb_idx, cv2.CAP_DSHOW)
+
 resize = False
 if user_res:
     resize = True
     resW, resH = int(user_res.split('x')[0]), int(user_res.split('x')[1])
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, resW)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resH)
 
-# Check if recording is valid and set up recording
-if record:
-    if source_type not in ['video','usb']:
-        print('Recording only works for video and camera sources. Please try again.')
-        sys.exit(0)
-    if not user_res:
-        print('Please specify resolution to record video at.')
-        sys.exit(0)
-    
-    # Set up recording
-    record_name = 'demo1.avi'
-    record_fps = 30
-    recorder = cv2.VideoWriter(record_name, cv2.VideoWriter_fourcc(*'MJPG'), record_fps, (resW,resH))
-
-# Load or initialize image source
-if source_type == 'image':
-    imgs_list = [img_source]
-elif source_type == 'folder':
-    imgs_list = []
-    filelist = glob.glob(img_source + '/*')
-    for file in filelist:
-        _, file_ext = os.path.splitext(file)
-        if file_ext in img_ext_list:
-            imgs_list.append(file)
-elif source_type == 'video' or source_type == 'usb':
-
-    if source_type == 'video': cap_arg = img_source
-    elif source_type == 'usb': cap_arg = usb_idx
-    cap = cv2.VideoCapture(cap_arg)
-
-    # Set camera or video resolution if specified by user
-    if user_res:
-        ret = cap.set(3, resW)
-        ret = cap.set(4, resH)
-
-elif source_type == 'picamera':
-    from picamera2 import Picamera2
-    cap = Picamera2()
-    cap.configure(cap.create_video_configuration(main={"format": 'RGB888', "size": (resW, resH)}))
-    cap.start()
-
-# Set bounding box colors (using the Tableu 10 color scheme)
-bbox_colors = [(164,120,87), (68,148,228), (93,97,209), (178,182,133), (88,159,106), 
-              (96,202,231), (159,124,168), (169,162,241), (98,118,150), (172,176,184)]
-
-# Initialize control and status variables
+bbox_colors = [(164,120,87), (68,148,228), (93,97,209), (178,182,133)]
 avg_frame_rate = 0
 frame_rate_buffer = []
-fps_avg_len = 200
-img_count = 0
 
-# Begin inference loop
+print("Starting inference on NVIDIA GPU. Press 'q' to quit.")
+
 while True:
-
     t_start = time.perf_counter()
-
-    # Load frame from image source
-    if source_type == 'image' or source_type == 'folder': # If source is image or image folder, load the image using its filename
-        if img_count >= len(imgs_list):
-            print('All images have been processed. Exiting program.')
-            sys.exit(0)
-        img_filename = imgs_list[img_count]
-        frame = cv2.imread(img_filename)
-        img_count = img_count + 1
+    ret, frame = cap.read()
     
-    elif source_type == 'video': # If source is a video, load next frame from video file
-        ret, frame = cap.read()
-        if not ret:
-            print('Reached end of the video file. Exiting program.')
-            break
-    
-    elif source_type == 'usb': # If source is a USB camera, grab frame from camera
-        ret, frame = cap.read()
-        if (frame is None) or (not ret):
-            print('Unable to read frames from the camera. This indicates the camera is disconnected or not working. Exiting program.')
-            break
+    if not ret or frame is None:
+        print('Camera disconnected.')
+        break
 
-    elif source_type == 'picamera': # If source is a Picamera, grab frames using picamera interface
-        frame = cap.capture_array()
-        if (frame is None):
-            print('Unable to read frames from the Picamera. This indicates the camera is disconnected or not working. Exiting program.')
-            break
+    if resize:
+        frame = cv2.resize(frame, (resW, resH))
 
-    # Resize frame to desired display resolution
-    if resize == True:
-        frame = cv2.resize(frame,(resW,resH))
+    image_height, image_width = frame.shape[:2]
 
-    # Run inference on frame
-    results = model(frame, verbose=False)
-
-    # Extract results
+    # Run inference explicitly on the NVIDIA device
+    results = model(frame, verbose=False, device=cuda_device)
     detections = results[0].boxes
-
-    # Initialize variable for basic object counting example
     object_count = 0
 
-    # Go through each detection and get bbox coords, confidence, and class
     for i in range(len(detections)):
-
-        # Get bounding box coordinates
-        # Ultralytics returns results in Tensor format, which have to be converted to a regular Python array
-        xyxy_tensor = detections[i].xyxy.cpu() # Detections in Tensor format in CPU memory
-        xyxy = xyxy_tensor.numpy().squeeze() # Convert tensors to Numpy array
-        xmin, ymin, xmax, ymax = xyxy.astype(int) # Extract individual coordinates and convert to int
-
-        # Get bounding box class ID and name
-        classidx = int(detections[i].cls.item())
-        classname = labels[classidx]
-
-        # Get bounding box confidence
         conf = detections[i].conf.item()
-
-        # Draw box if confidence threshold is high enough
+        
         if conf > min_thresh:
+            xyxy = detections[i].xyxy.cpu().numpy().squeeze().astype(int) 
+            xmin, ymin, xmax, ymax = xyxy
+            classidx = int(detections[i].cls.item())
+            classname = labels[classidx]
+            
+            # --- YOUR EXACT TRIANGLE MATH ---
+            # 1. Center of the ball
+            x_center = (xmin + xmax) / 2.0
+            y_center = (ymin + ymax) / 2.0
+            
+            # 2. Left middle side of the box
+            x_left = float(xmin)
+            
+            # 3. The point on the bottom of the screen directly below the ball
+            x_bottom = x_center
+            y_bottom = float(image_height)
 
-            color = bbox_colors[classidx % 10]
+            # Calculate pixel lengths of the triangle sides
+            # Opposite = Base (from center to left side)
+            pixel_opposite = x_center - x_left 
+            # Adjacent = Height (from center down to the bottom of the frame)
+            pixel_adjacent = y_bottom - y_center 
+
+            # Calculate tan(alpha) = Opposite / Adjacent
+            if pixel_adjacent > 0:
+                tan_alpha = pixel_opposite / pixel_adjacent
+                
+                # Your formula: 21mm / tan(alpha)
+                if tan_alpha > 0:
+                    distance_mm = 21.0 / tan_alpha
+                else:
+                    distance_mm = 0.0
+            else:
+                distance_mm = 0.0
+
+            distance_cm = distance_mm / 10.0
+
+            # --- VISUALIZATION DRAWING ---
+            color = bbox_colors[classidx % len(bbox_colors)]
             cv2.rectangle(frame, (xmin,ymin), (xmax,ymax), color, 2)
+            
+            # Draw the Triangle you described:
+            # 1. Base (Center to Left Side) - Red Line
+            cv2.line(frame, (int(x_center), int(y_center)), (int(x_left), int(y_center)), (0, 0, 255), 2)
+            # 2. Height (Center straight down to bottom) - Blue Line
+            cv2.line(frame, (int(x_center), int(y_center)), (int(x_bottom), int(y_bottom)), (255, 0, 0), 2)
+            # 3. Hypotenuse (Left side down to the bottom corner) - Green Line
+            cv2.line(frame, (int(x_left), int(y_center)), (int(x_bottom), int(y_bottom)), (0, 255, 0), 2)
+            
+            # Draw dots at the 3 corners of the triangle
+            cv2.circle(frame, (int(x_center), int(y_center)), 5, (0, 255, 255), -1)   # Ball Center
+            cv2.circle(frame, (int(x_left), int(y_center)), 5, (0, 255, 255), -1)     # Left Edge
+            cv2.circle(frame, (int(x_bottom), int(y_bottom)), 5, (0, 255, 255), -1)   # Bottom Frame (Angle Alpha)
 
-            label = f'{classname}: {int(conf*100)}%'
-            labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1) # Get font size
-            label_ymin = max(ymin, labelSize[1] + 10) # Make sure not to draw label too close to top of window
-            cv2.rectangle(frame, (xmin, label_ymin-labelSize[1]-10), (xmin+labelSize[0], label_ymin+baseLine-10), color, cv2.FILLED) # Draw white box to put label text in
-            cv2.putText(frame, label, (xmin, label_ymin-7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1) # Draw label text
+            # Draw labels
+            label = f'{classname} | Dist: {distance_cm:.1f} cm'
+            cv2.putText(frame, label, (xmin, ymin-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            object_count += 1
 
-            # Basic example: count the number of objects in the image
-            object_count = object_count + 1
+    # Draw FPS
+    cv2.putText(frame, f'FPS: {avg_frame_rate:0.1f}', (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+    cv2.imshow('RoboCup Vision (NVIDIA CUDA)', frame)
 
-    # Calculate and draw framerate (if using video, USB, or Picamera source)
-    if source_type == 'video' or source_type == 'usb' or source_type == 'picamera':
-        cv2.putText(frame, f'FPS: {avg_frame_rate:0.2f}', (10,20), cv2.FONT_HERSHEY_SIMPLEX, .7, (0,255,255), 2) # Draw framerate
-    
-    # Display detection results
-    cv2.putText(frame, f'Number of objects: {object_count}', (10,40), cv2.FONT_HERSHEY_SIMPLEX, .7, (0,255,255), 2) # Draw total number of detected objects
-    cv2.imshow('YOLO detection results',frame) # Display image
-    if record: recorder.write(frame)
-
-    # If inferencing on individual images, wait for user keypress before moving to next image. Otherwise, wait 5ms before moving to next frame.
-    if source_type == 'image' or source_type == 'folder':
-        key = cv2.waitKey()
-    elif source_type == 'video' or source_type == 'usb' or source_type == 'picamera':
-        key = cv2.waitKey(5)
-    
-    if key == ord('q') or key == ord('Q'): # Press 'q' to quit
+    if cv2.waitKey(1) & 0xFF == ord('q'): 
         break
-    elif key == ord('s') or key == ord('S'): # Press 's' to pause inference
-        cv2.waitKey()
-    elif key == ord('p') or key == ord('P'): # Press 'p' to save a picture of results on this frame
-        cv2.imwrite('capture.png',frame)
-    
-    # Calculate FPS for this frame
+
+    # Calculate FPS
     t_stop = time.perf_counter()
-    frame_rate_calc = float(1/(t_stop - t_start))
-
-    # Append FPS result to frame_rate_buffer (for finding average FPS over multiple frames)
-    if len(frame_rate_buffer) >= fps_avg_len:
-        temp = frame_rate_buffer.pop(0)
-        frame_rate_buffer.append(frame_rate_calc)
-    else:
-        frame_rate_buffer.append(frame_rate_calc)
-
-    # Calculate average FPS for past frames
+    frame_rate_buffer.append(1/(t_stop - t_start))
+    if len(frame_rate_buffer) > 15:
+        frame_rate_buffer.pop(0)
     avg_frame_rate = np.mean(frame_rate_buffer)
 
-
-# Clean up
-print(f'Average pipeline FPS: {avg_frame_rate:.2f}')
-if source_type == 'video' or source_type == 'usb':
-    cap.release()
-elif source_type == 'picamera':
-    cap.stop()
-if record: recorder.release()
+cap.release()
 cv2.destroyAllWindows()
