@@ -16,8 +16,8 @@ CENTER_X = RES_WIDTH / 2.0  # Die "Nase" des Roboters
 # --- FARB-FILTER (HSV) ---
 # Trage hier die exakten Werte ein, die ihr mit dem Slider-Skript gefunden habt!
 # Beispiel-Werte für ein typisches Orange:
-LOWER_ORANGE = np.array([5, 120, 100])
-UPPER_ORANGE = np.array([25, 255, 255])
+LOWER_ORANGE = np.array([3, 54, 205])
+UPPER_ORANGE = np.array([19, 154, 255])
 
 # --- STEUERUNG ---
 DEADZONE_PIXELS = 40        # Toleranzbereich in der Mitte (in Pixeln)
