@@ -57,7 +57,7 @@ python OpenCV_Ball_Detection_main.py
 ```
 
 **3. Calibration with GUI**
-If you already have seen the file with name "OpenCV_Ball_Detection_calibration_with_GUI.py" it's a program that show the visual calibration for the HSV values. This program requires graphical chips, that can represent an image on the device. To start it just copy this command into the terminal:
+If you already have seen the file with the name "OpenCV_Ball_Detection_calibration_with_GUI.py" it's a program that shows a visual calibration for the HSV values. This program requires graphical chips, that can represent an image on the device. To start it just copy this command into the terminal:
 ```bash
 python OpenCV_Ball_Detection_calibration_with_GUI.py
 ```
