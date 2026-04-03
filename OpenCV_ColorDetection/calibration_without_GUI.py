@@ -11,7 +11,7 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 GRID_W, GRID_H = 30, 30
 
 def extract_ball_pixels(frame, rough_lower, rough_upper):
-    """Findet den Ball und gibt alle H, S und V Pixel zurück."""
+    """Findet den Ball und gibt alle H, S und V Pixel innerhalb des Kreises zurück."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, rough_lower, rough_upper)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -21,21 +21,29 @@ def extract_ball_pixels(frame, rough_lower, rough_upper):
     largest = max(contours, key=cv2.contourArea)
     if cv2.contourArea(largest) < 100: return None, None, None
         
-    ball_mask = np.zeros(frame.shape[:2], dtype="uint8")
-    cv2.drawContours(ball_mask, [largest], -1, 255, -1)
+    # --- NEU: Kreis berechnen statt nur die Kontur zu nehmen ---
+    ((cx, cy), radius) = cv2.minEnclosingCircle(largest)
     
+    # Radius um 15% verkleinern, damit wir garantiert nur den Ball und keinen Hintergrund erwischen
+    safe_radius = int(radius * 0.85)
+    
+    # Neue leere Maske erstellen und einen soliden Kreis einzeichnen
+    ball_mask = np.zeros(frame.shape[:2], dtype="uint8")
+    cv2.circle(ball_mask, (int(cx), int(cy)), safe_radius, 255, -1)
+    
+    # H, S und V Kanäle trennen und nur die Pixel IN diesem gezeichneten Kreis zurückgeben
     h_chan, s_chan, v_chan = cv2.split(hsv)
     return h_chan[ball_mask==255], s_chan[ball_mask==255], v_chan[ball_mask==255]
 
 print("\n" + "="*55)
-print(" RASPBERRY PI - KALIBRIERUNG MIT LIVE-RADAR")
+print(" RASPBERRY PI - KALIBRIERUNG MIT LIVE-RADAR (CIRCLE-MODE)")
 print("="*55)
 time.sleep(2)
 input(">>> Halte den Ball vor die Kamera und druecke ENTER... ")
 
-# Grobe Werte, damit wir den Ball überhaupt im Radar sehen
-rough_lower = np.array([0, 80, 80])
-rough_upper = np.array([30, 255, 255])
+# Grobe Werte, damit wir den Ball überhaupt im Radar finden
+rough_lower = np.array([0, 55, 192])
+rough_upper = np.array([20, 175, 255])
 
 medians_H, medians_S, medians_V = [], [], []
 TOTAL_FRAMES = 10   
@@ -76,13 +84,13 @@ while frames_taken < TOTAL_FRAMES:
     
     h_p, s_p, v_p = extract_ball_pixels(frame, rough_lower, rough_upper)
     
-    if h_p is not None:
+    if h_p is not None and len(h_p) > 0:
         med_h, med_s, med_v = np.median(h_p), np.median(s_p), np.median(v_p)
         medians_H.append(med_h)
         medians_S.append(med_s)
         medians_V.append(med_v)
         frames_taken += 1
-        print(f"\n[+] KLICK! Werte gespeichert (H:{med_h:.1f} S:{med_s:.1f} V:{med_v:.1f})")
+        print(f"\n[+] KLICK! Werte von {len(h_p)} Pixeln im Kreis analysiert (H:{med_h:.1f} S:{med_s:.1f} V:{med_v:.1f})")
         time.sleep(1.5)
     else:
         print("\n[!] FEHLER: Ball beim Klick nicht gefunden! Versuche es nochmal.")
@@ -92,7 +100,7 @@ while frames_taken < TOTAL_FRAMES:
 sys.stdout.write("\033[H\033[J")
 final_h, final_s, final_v = int(np.mean(medians_H)), int(np.mean(medians_S)), int(np.mean(medians_V))
 
-# Toleranzen
+# Toleranzen (Hier kannst du anpassen, wie strikt der Filter sein soll)
 tol_h, tol_s, tol_v = 10, 60, 60
 
 lower_bound = np.array([max(0, final_h - tol_h), max(0, final_s - tol_s), max(0, final_v - tol_v)])
