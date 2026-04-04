@@ -1,70 +1,85 @@
-# 🤖 Pi Zero OpenCV Ball Tracker
+# 🤖 RoboCup Junior - Vision System (OpenCV & AI)
 
-![Python](https://img.shields.io/badge/python-3.7+-blue.svg)
+![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-green.svg)
-![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red.svg)
+![YOLO](https://img.shields.io/badge/AI-YOLO-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20Zero-red.svg)
 
-A lightweight, headless computer vision script optimized for the Raspberry Pi Zero. It calibrates HSV color values using statistical medians and provides live distance and steering telemetry for RoboCup robots.
+This repository contains the visual detection system for our RoboCup Junior Soccer (Open League) robot. The goal is to detect the orange golf ball reliably and with extremely low latency.
 
----
-
-## 📋 Prerequisites
-
-Before you begin, ensure you have the following hardware and software:
-* **Hardware:** Raspberry Pi Zero (W/2W), Raspberry Pi Camera Module V2, an orange golf ball.
-* **OS:** Raspberry Pi OS (Bullseye or newer).
-* **Network:** SSH access to your Pi.
+Because our main robot relies on a heavily resource-constrained **Raspberry Pi Zero**, we split our vision research into two distinct approaches:
+1. A highly hardware-optimized **OpenCV Pipeline** (our primary competition code).
+2. A custom-trained **YOLO AI Model** (for validation, PC testing, and future hardware upgrades).
 
 ---
 
-## 🚀 Installation
+## ⚙️ Installation & Setup
 
-Follow these steps to set up the project on your Raspberry Pi. 
+To make setting up the project on a new PC or the Raspberry Pi as easy as possible, we use a central `requirements.txt` file.
 
-**1. Clone the repository:**
+You can install all necessary libraries with a single command:
+
 ```bash
-git clone https://github.com/Robocup-Junior-Open-League/AI_Golf_Ball_Detection.git
-cd LocationOfYourDirectory
-```
-
-**2. Update your system and install OpenCV dependencies:**
-```bash
-sudo apt-get update
-sudo apt-get install python3-opencv -y
-sudo apt-get install libqt4-test python3-sip python3-pyqt5 libqtgui4 libjasper-dev libatlas-base-dev -y
-```
-
-**3. Install required Python packages:**
-```bash
-pip install numpy
+pip install -r requirements.txt
 ```
 
 ---
 
-## ⚙️ Usage
+## 🏎️ Approach 1: OpenCV (Competition Mode)
+Folder: `opencv_detect/`
 
-**1. Auto-Calibration**
-To adapt the camera to your current room lighting, run the calibration script first. Hold the orange ball in front of the camera.
+This is our main competition codebase. It is designed to run completely "headless" (no graphical user interface) on the Raspberry Pi Zero. By heavily downscaling the camera stream (e.g., to `160x120` or `160x90`), it requires minimal CPU resources while maintaining high FPS.
+
+**Key Features**
+
+* **Custom Weights:** Scripts to quickly adapt to the specific lighting conditions of the competition field.
+* **Adaptive EMA Smoothing:** An intelligent, lightweight filter that aggressively removes sensor noise but reacts instantly to fast ball movements.
+* **SSH/JSON Telemetry:** Broadcasts the calculated distance and steering commands directly to the main `robus-core` redis database.
+
+**Quick Start** 
+
+1. **Run Calibration:** Run the headless calibration script to find the perfect HSV values for the current room lighting:
+
 ```bash
-python calibration_without_GUI.py
+python opencv_detect/calibration_no_GUI.py
 ```
-**Note:** The script will take 10 photos with a 5-second delay to calculate the perfect HSV median.
 
-**2. Live Telemetry Tracking**
-Once you have your HSV values, start the main tracking script to output the JSON telemetry payload (Distance, Error-X, Error-Y):
-```bash
-python OpenCV_Ball_Detection_main.py
-```
+2. **Start Detection:**
 
-**3. Calibration with GUI**
-If you already have seen the file with the name "OpenCV_Ball_Detection_calibration_with_GUI.py" it's a program that shows a visual calibration for the HSV values. This program requires graphical chips, that can represent an image on the device. To start it just copy this command into the terminal:
+Update the HSV bounds in the main script and start the tracking node:
+
 ```bash
-python OpenCV_Ball_Detection_calibration_with_GUI.py
+python opencv_detect/detection_main.py
 ```
 
 ---
 
-## 🛠️ Troubleshooting
+## 🧠 Approach 2: YOLO AI Model (Research) ##
 
-* **Camera not found:** Ensure the ribbon cable is seated correctly and the legacy camera stack is enabled via sudo raspi-config.
-* **Low Framerate:** The Pi Zero is limited. Ensure the camera resolution in the script is set to 320x240.
+Folder: `yolo_model/`
+
+To push the boundaries of our object detection, we trained a custom Neural Network. We annotated hundreds of images of the official orange RoboCup golf ball using Label Studio and trained a YOLO model.
+
+While this model is currently too computationally heavy to run at high framerates on a Pi Zero, it provides incredibly robust detection on a PC—even with occluded balls or severe lighting reflections.
+
+**Key Features**
+
+* **Custom Weights:** The fully trained models are available as `best.pt` and `last.pt` inside `yolo_model/Orange_Ball_Detection/my_model/train/weights/`.
+* **Training Data:** Includes `args.yaml`, confusion matrices, and precision-recall curves inside the `train/` directory.
+* **Label Studio Backup:** Raw annotations and the Label Studio SQLite database are included for full transparency.
+
+**Quick Start**
+
+To test the AI model live using your PC webcam:
+
+```bash
+python yolo_model/Orange_Ball_Detection/my_model/yolo_detect.py
+```
+
+(Ensure the path to `best.pt` is set correctly inside the script).
+
+---
+
+## 🏆 Team Documentation ##
+
+This repository is part of our Technical Description Paper (TDP) for the Austrian Open.
