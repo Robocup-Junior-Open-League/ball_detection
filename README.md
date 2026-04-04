@@ -26,15 +26,15 @@ pip install -r requirements.txt
 ---
 
 ## 🏎️ Approach 1: OpenCV (Competition Mode)
-Folder: opencv_detect/
+Folder: `opencv_detect/`
 
-This is our main competition codebase. It is designed to run completely "headless" (no graphical user interface) on the Raspberry Pi Zero. By heavily downscaling the camera stream (e.g., to 160x120 or 160x90), it requires minimal CPU resources while maintaining high FPS.
+This is our main competition codebase. It is designed to run completely "headless" (no graphical user interface) on the Raspberry Pi Zero. By heavily downscaling the camera stream (e.g., to `160x120` or `160x90`), it requires minimal CPU resources while maintaining high FPS.
 
 **Key Features**
 
 * **Custom Weights:** Scripts to quickly adapt to the specific lighting conditions of the competition field.
 * **Adaptive EMA Smoothing:** An intelligent, lightweight filter that aggressively removes sensor noise but reacts instantly to fast ball movements.
-* **SSH/JSON Telemetry:** Broadcasts the calculated distance and steering commands directly to the main robus-core redis database.
+* **SSH/JSON Telemetry:** Broadcasts the calculated distance and steering commands directly to the main `robus-core` redis database.
 
 **Quick Start** 
 
@@ -56,7 +56,7 @@ python opencv_detect/detection_main.py
 
 ## 🧠 Approach 2: YOLO AI Model (Research) ##
 
-Folder: yolo_model/
+Folder: `yolo_model/`
 
 To push the boundaries of our object detection, we trained a custom Neural Network. We annotated hundreds of images of the official orange RoboCup golf ball using Label Studio and trained a YOLO model.
 
@@ -64,8 +64,8 @@ While this model is currently too computationally heavy to run at high framerate
 
 **Key Features**
 
-* **Custom Weights:** The fully trained models are available as best.pt and last.pt inside yolo_model/Orange_Ball_Detection/my_model/train/weights/.
-* **Training Data:** Includes args.yaml, confusion matrices, and precision-recall curves inside the train/ directory.
+* **Custom Weights:** The fully trained models are available as `best.pt` and `last.pt` inside `yolo_model/Orange_Ball_Detection/my_model/train/weights/`.
+* **Training Data:** Includes `args.yaml`, confusion matrices, and precision-recall curves inside the `train/` directory.
 * **Label Studio Backup:** Raw annotations and the Label Studio SQLite database are included for full transparency.
 
 **Quick Start**
@@ -76,7 +76,7 @@ To test the AI model live using your PC webcam:
 python yolo_model/Orange_Ball_Detection/my_model/yolo_detect.py
 ```
 
-(Ensure the path to best.pt is set correctly inside the script).
+(Ensure the path to `best.pt` is set correctly inside the script).
 
 ---
 
